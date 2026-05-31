@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'   # triggers on v1.0.0, v1.2.3, ...
+
+permissions:
+  contents: write  # needed to create GitHub Release
+
+jobs:
+  release:
+    name: Build & Release (Universal)
+    runs-on: macos-15
+
+    env:
+      # Set these secrets in repo Settings → Secrets
+      CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+      NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
+      NOTARIZE_TEAM_ID:  ${{ secrets.NOTARIZE_TEAM_ID }}
+      NOTARIZE_PASSWORD: ${{ secrets.NOTARIZE_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Import Developer ID certificate
+        if: env.CODESIGN_IDENTITY != ''
+        run: |
+          echo "${{ secrets.CODESIGN_CERT_P12_B64 }}" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "${{ secrets.CODESIGN_CERT_PASSPHRASE }}" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          rm /tmp/cert.p12
+
+      - name: Build universal .app
+        run: bash Scripts/build-app.sh release universal
+        env:
+          CLIPMANAGER_VERSION: ${{ steps.version.outputs.VERSION }}
+
+      - name: Notarize .app
+        if: env.NOTARIZE_APPLE_ID != ''
+        run: |
+          xcrun notarytool submit build/ClipManager.app \
+            --apple-id "$NOTARIZE_APPLE_ID" \
+            --team-id  "$NOTARIZE_TEAM_ID" \
+            --password "$NOTARIZE_PASSWORD" \
+            --wait
+          xcrun stapler staple build/ClipManager.app
+
+      - name: Create DMG
+        run: bash Scripts/create-dmg.sh
+        env:
+          CLIPMANAGER_VERSION: ${{ steps.version.outputs.VERSION }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ClipManager ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            build/ClipManager-${{ steps.version.outputs.VERSION }}.dmg

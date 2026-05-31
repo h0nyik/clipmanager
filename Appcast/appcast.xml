@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>ClipManager</title>
+        <link>https://github.com/roztisk/clipmanager</link>
+        <description>ClipManager — macOS správce schránky</description>
+        <language>cs</language>
+        <!-- Releases will be added here by the release workflow or manually -->
+        <!--
+        <item>
+            <title>Version 1.0.0</title>
+            <pubDate>Sat, 01 Jan 2025 00:00:00 +0000</pubDate>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/roztisk/clipmanager/releases/download/v1.0.0/ClipManager-1.0.0.dmg"
+                sparkle:edSignature="SIGNATURE_HERE"
+                length="0"
+                type="application/octet-stream"/>
+        </item>
+        -->
+    </channel>
+</rss>
