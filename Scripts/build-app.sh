@@ -17,15 +17,15 @@ echo "→ Building ${PRODUCT_NAME} (config=${CONFIG}, arch=${ARCH})"
 
 # ---- Build binary ----
 if [ "$ARCH" = "universal" ]; then
-    swift build -c "$CONFIG" --arch arm64 --arch x86_64
-    BINARY=".build/apple/Products/${CONFIG^}/${PRODUCT_NAME}"
-elif [ "$ARCH" = "arm64" ]; then
-    swift build -c "$CONFIG" --arch arm64
-    BINARY=".build/arm64-apple-macosx/${CONFIG}/${PRODUCT_NAME}"
+    ARCH_FLAGS=(--arch arm64 --arch x86_64)
 else
-    swift build -c "$CONFIG" --arch x86_64
-    BINARY=".build/x86_64-apple-macosx/${CONFIG}/${PRODUCT_NAME}"
+    ARCH_FLAGS=(--arch "$ARCH")
 fi
+
+swift build -c "$CONFIG" "${ARCH_FLAGS[@]}"
+# Ask SwiftPM for the output dir instead of hardcoding it (macOS ships bash 3.2,
+# so no ${VAR^} to capitalize "release" → "Release").
+BINARY="$(swift build -c "$CONFIG" "${ARCH_FLAGS[@]}" --show-bin-path)/${PRODUCT_NAME}"
 
 # ---- Assemble .app bundle ----
 rm -rf "${OUTPUT_DIR}/${PRODUCT_NAME}.app"
