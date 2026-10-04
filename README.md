@@ -22,7 +22,7 @@ Jednoduchý, rychlý a nativní správce historie schránky pro macOS.
 
 ### DMG (doporučeno)
 
-1. Stáhni nejnovější `ClipManager-x.x.x.dmg` z [Releases](https://github.com/roztisk/clipmanager/releases)
+1. Stáhni nejnovější `ClipManager-x.x.x.dmg` z [Releases](https://github.com/h0nyik/clipmanager/releases)
 2. Přetáhni `ClipManager.app` do `/Applications`
 3. Spusť aplikaci
 
@@ -42,7 +42,7 @@ brew install --cask clipmanager
 - Xcode 15+ nebo Swift 5.9 toolchain
 
 ```sh
-git clone https://github.com/roztisk/clipmanager.git
+git clone https://github.com/h0nyik/clipmanager.git
 cd clipmanager
 
 # Sestavení .app bundle (universal binary)
@@ -119,6 +119,7 @@ Sources/ClipManager/
 
 ## Roadmap
 
+- [ ] Dvojité `⌘V` — vrátí první vložení a u kurzoru vyroluje historii s nativní animací ([specifikace](docs/double-paste.md))
 - [ ] Vyhledávání v historii
 - [ ] Blacklist aplikací (nemonitorovat hesla z 1Password apod.)
 - [ ] Sparkle auto-update (místo GitHub API)
