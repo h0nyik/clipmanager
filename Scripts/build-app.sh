@@ -35,8 +35,15 @@ mkdir -p "${APP_DIR}/Resources"
 # Binary
 cp "$BINARY" "${APP_DIR}/MacOS/${PRODUCT_NAME}"
 
-# Info.plist
+# Info.plist (version from the release tag / CI run, if provided)
 cp "$PLIST_SRC" "${APP_DIR}/Info.plist"
+if [ -n "${CLIPMANAGER_VERSION:-}" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${CLIPMANAGER_VERSION}" "${APP_DIR}/Info.plist"
+fi
+BUILD_NUMBER="${CLIPMANAGER_BUILD:-${GITHUB_RUN_NUMBER:-}}"
+if [ -n "$BUILD_NUMBER" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${APP_DIR}/Info.plist"
+fi
 
 # App icon (if built)
 if [ -f "${OUTPUT_DIR}/AppIcon.icns" ]; then

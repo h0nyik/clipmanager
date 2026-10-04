@@ -5,9 +5,9 @@ import SwiftUI
 struct ClipboardPanelView: View {
 
     @EnvironmentObject var store: ClipboardStore
+    @EnvironmentObject var panelState: PanelState
 
     @State private var selectedIndex: Int = 0
-    @State private var searchText: String = ""
     @FocusState private var isFocused: Bool
 
     private var displayItems: [ClipboardItem] {
@@ -34,7 +34,7 @@ struct ClipboardPanelView: View {
                 footer
             }
         }
-        .frame(width: 420, height: 560)
+        .frame(width: ClipboardPanel.size.width, height: ClipboardPanel.size.height)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -47,18 +47,17 @@ struct ClipboardPanelView: View {
                     lineWidth: 0.8
                 )
         )
-        .shadow(color: .black.opacity(0.35), radius: 28, x: 0, y: 14)
-        .padding(8)
         .focusable()
+        .focusEffectDisabled()
         .focused($isFocused)
         .onKeyPress(.escape)     { closePanel(); return .handled }
         .onKeyPress(.upArrow)    { moveSelection(by: -1); return .handled }
         .onKeyPress(.downArrow)  { moveSelection(by: 1); return .handled }
         .onKeyPress(.return)     { pasteSelected(); return .handled }
-        .onAppear {
-            selectedIndex = 0
-            isFocused = true
-        }
+        .onKeyPress(.delete)     { deleteSelected(); return .handled }
+        .onAppear { resetForOpen() }
+        .onChange(of: panelState.openID) { _, _ in resetForOpen() }
+        .onChange(of: store.items.count) { _, _ in clampSelection() }
     }
 
     // MARK: - Header
@@ -81,7 +80,9 @@ struct ClipboardPanelView: View {
                 .monospacedDigit()
 
             Button {
-                store.clearAll(keepPinned: true)
+                if ClipboardStore.confirmClearHistory() {
+                    store.clearAll(keepPinned: true)
+                }
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 13))
@@ -143,6 +144,11 @@ struct ClipboardPanelView: View {
                             }
                         }
                     }
+                    .onChange(of: panelState.openID) { _, _ in
+                        if let first = displayItems.first {
+                            proxy.scrollTo(first.id, anchor: .top)
+                        }
+                    }
                 }
             }
         }
@@ -166,6 +172,7 @@ struct ClipboardPanelView: View {
         HStack(spacing: 16) {
             Label("Vybrat", systemImage: "return")
             Label("Navigovat", systemImage: "arrow.up.arrow.down")
+            Label("Smazat", systemImage: "delete.left")
             Label("Zavřít", systemImage: "escape")
         }
         .font(.system(size: 10, weight: .medium))
@@ -184,20 +191,14 @@ struct ClipboardPanelView: View {
         Divider()
         Button("Smazat", role: .destructive) {
             store.removeItem(item)
-            selectedIndex = min(selectedIndex, max(0, displayItems.count - 2))
         }
     }
 
     // MARK: - Actions
 
     private func pasteItem(_ item: ClipboardItem) {
-        if AppSettings.shared.pasteOnSelect {
-            delegate?.pasteItem(item)
-        } else {
-            ClipboardMonitor.shared.ignoringNextChange = true
-            PasteService.writeToPasteboard(item)
-            closePanel()
-        }
+        // AppDelegate handles both modes (auto-paste on / copy only)
+        delegate?.pasteItem(item)
     }
 
     private func pasteSelected() {
@@ -207,6 +208,21 @@ struct ClipboardPanelView: View {
 
     private func closePanel() {
         delegate?.closePanel()
+    }
+
+    private func deleteSelected() {
+        guard let item = displayItems[safe: selectedIndex] else { return }
+        store.removeItem(item)
+    }
+
+    private func resetForOpen() {
+        selectedIndex = 0
+        // Focus after the window became key, otherwise arrow keys may not reach the view
+        DispatchQueue.main.async { isFocused = true }
+    }
+
+    private func clampSelection() {
+        selectedIndex = min(selectedIndex, max(0, displayItems.count - 1))
     }
 
     private func moveSelection(by delta: Int) {

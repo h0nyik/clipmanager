@@ -19,32 +19,54 @@ enum UpdateChecker {
         request.setValue("ClipManager/\(currentVersion)", forHTTPHeaderField: "User-Agent")
 
         URLSession.shared.dataTask(with: request) { data, response, _ in
+            // /releases/latest never returns drafts or pre-releases; 404 = no stable release yet
+            if (response as? HTTPURLResponse)?.statusCode == 404 {
+                if force { DispatchQueue.main.async { presentInfo("Máš nejnovější verzi", "Zatím není vydaná žádná novější stabilní verze.") } }
+                return
+            }
             guard let data,
-                  let release = try? JSONDecoder().decode(GitHubRelease.self, from: data),
-                  !release.draft,
-                  !release.prerelease else { return }
+                  let release = try? JSONDecoder().decode(GitHubRelease.self, from: data) else {
+                if force { DispatchQueue.main.async { presentInfo("Aktualizace se nepodařilo zkontrolovat.", "Zkus to prosím později.") } }
+                return
+            }
 
             let latest = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
 
-            guard isNewerVersion(latest, than: currentVersion) else { return }
-
             DispatchQueue.main.async {
-                presentUpdateAlert(latestVersion: latest, releaseURL: release.htmlURL)
+                if isNewerVersion(latest, than: currentVersion) {
+                    presentUpdateAlert(latestVersion: latest, releaseURL: release.htmlURL)
+                } else if force {
+                    presentInfo("Máš nejnovější verzi", "ClipManager \(currentVersion) je aktuální.")
+                }
             }
         }.resume()
     }
 
     // MARK: - Helpers
 
-    private static var currentVersion: String {
+    static var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    }
+
+    static var currentBuild: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
     }
 
     private static func isNewerVersion(_ remote: String, than local: String) -> Bool {
         remote.compare(local, options: .numeric) == .orderedDescending
     }
 
+    private static func presentInfo(_ title: String, _ message: String) {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     private static func presentUpdateAlert(latestVersion: String, releaseURL: String) {
+        NSApp.activate()
         let alert = NSAlert()
         alert.messageText = "Dostupná nová verze ClipManager \(latestVersion)"
         alert.informativeText = "Stáhni aktualizaci z GitHubu."
@@ -64,13 +86,9 @@ enum UpdateChecker {
 private struct GitHubRelease: Decodable {
     let tagName: String
     let htmlURL: String
-    let draft: Bool
-    let prerelease: Bool
 
     enum CodingKeys: String, CodingKey {
         case tagName    = "tag_name"
         case htmlURL    = "html_url"
-        case draft
-        case prerelease
     }
 }

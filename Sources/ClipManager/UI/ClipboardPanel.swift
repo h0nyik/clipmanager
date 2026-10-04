@@ -5,9 +5,11 @@ import SwiftUI
 
 final class ClipboardPanel: NSWindow {
 
+    static let size = NSSize(width: 420, height: 560)
+
     init(contentView: some View) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 560),
+            contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -16,21 +18,22 @@ final class ClipboardPanel: NSWindow {
         level                    = .floating
         backgroundColor          = .clear
         isOpaque                 = false
-        hasShadow                = true
+        hasShadow                = true   // follows the rounded, transparent content
         isMovableByWindowBackground = false
-        hidesOnDeactivate        = true
+        hidesOnDeactivate        = false  // AppDelegate closes it on deactivate
         collectionBehavior       = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isReleasedWhenClosed     = false
 
         let hosting = NSHostingView(rootView: contentView)
-        hosting.frame = frame
+        hosting.sizingOptions = []        // window size is fixed; don't let SwiftUI resize it
+        hosting.frame = NSRect(origin: .zero, size: Self.size)
         self.contentView = hosting
     }
 
-    // Forward Escape to the SwiftUI content (belt & suspenders)
+    // Escape fallback when the SwiftUI view doesn't have focus
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { // Escape
-            orderOut(nil)
+            (NSApp.delegate as? AppDelegate)?.closePanel()
         } else {
             super.keyDown(with: event)
         }

@@ -7,8 +7,8 @@ struct SettingsView: View {
     @EnvironmentObject var store: ClipboardStore
     @ObservedObject private var settings = AppSettings.shared
 
-    @State private var isRecordingHotkey = false
     @State private var historyLimitStr: String = ""
+    @State private var hasAccessibility = PasteService.hasAccessibility
 
     var body: some View {
         Form {
@@ -23,6 +23,14 @@ struct SettingsView: View {
         .frame(width: 460)
         .onAppear {
             historyLimitStr = "\(settings.historyLimit)"
+            hasAccessibility = PasteService.hasAccessibility
+        }
+        // Permission is granted in System Settings — refresh when the user comes back
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            hasAccessibility = PasteService.hasAccessibility
+        }
+        .onChange(of: settings.persistHistory) { _, _ in
+            store.save()
         }
     }
 
@@ -40,13 +48,8 @@ struct SettingsView: View {
                 TextField("100", text: $historyLimitStr)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 60)
-                    .onSubmit {
-                        if let val = Int(historyLimitStr), val > 0, val <= 10_000 {
-                            settings.historyLimit = val
-                        } else {
-                            historyLimitStr = "\(settings.historyLimit)"
-                        }
-                    }
+                    .onSubmit(applyHistoryLimit)
+                    .onDisappear(perform: applyHistoryLimit)
                 Text("položek")
                     .foregroundStyle(.secondary)
             }
@@ -83,7 +86,9 @@ struct SettingsView: View {
             }
 
             Button("Vymazat historii (zachovat připnuté)") {
-                store.clearAll(keepPinned: true)
+                if ClipboardStore.confirmClearHistory() {
+                    store.clearAll(keepPinned: true)
+                }
             }
             .foregroundStyle(.red)
         }
@@ -93,8 +98,13 @@ struct SettingsView: View {
         Section("Aktualizace") {
             Toggle("Kontrolovat aktualizace automaticky", isOn: $settings.checkUpdates)
 
-            Button("Zkontrolovat nyní") {
-                UpdateChecker.checkForUpdates(force: true)
+            HStack {
+                Text("Verze \(UpdateChecker.currentVersion) (\(UpdateChecker.currentBuild))")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Zkontrolovat nyní") {
+                    UpdateChecker.checkForUpdates(force: true)
+                }
             }
         }
     }
@@ -103,19 +113,33 @@ struct SettingsView: View {
         Section("Přístupnost") {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Automatické vkládání")
-                        .font(.body)
-                    Text("Vyžaduje povolení v Nastavení systému → Soukromí → Přístupnost")
+                    Label(
+                        hasAccessibility ? "Automatické vkládání povoleno" : "Automatické vkládání nemá oprávnění",
+                        systemImage: hasAccessibility ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(hasAccessibility ? Color.green : Color.orange)
+                    Text("Nastavení systému → Soukromí a zabezpečení → Přístupnost")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Otevřít nastavení") {
-                    PasteService.requestAccessibilityIfNeeded()
+                if !hasAccessibility {
+                    Button("Povolit…") {
+                        PasteService.requestAccessibility()
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
             }
+        }
+    }
+
+    private func applyHistoryLimit() {
+        if let val = Int(historyLimitStr), val > 0, val <= 10_000 {
+            settings.historyLimit = val
+            store.trimToLimit()
+        } else {
+            historyLimitStr = "\(settings.historyLimit)"
         }
     }
 

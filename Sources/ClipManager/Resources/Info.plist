@@ -13,9 +13,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.1.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSPrincipalClass</key>
@@ -24,7 +24,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2025 ClipManager contributors. MIT License.</string>
+    <string>Copyright © 2025–2026 ClipManager contributors. MIT License.</string>
     <!-- Accessibility usage description (shown in System Settings) -->
     <key>NSAppleEventsUsageDescription</key>
     <string>ClipManager potřebuje posílat klávesové zkratky pro automatické vkládání obsahu schránky.</string>

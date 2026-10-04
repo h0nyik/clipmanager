@@ -78,7 +78,8 @@ struct ClipboardItemView: View {
 
     private var textPreview: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(item.displayText ?? item.category.rawValue)
+            // Only two lines are shown; never hand SwiftUI a huge string to lay out (v1.0 stored full text)
+            Text(String((item.displayText ?? item.category.title).prefix(300)))
                 .font(.system(size: 13))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
@@ -139,23 +140,43 @@ struct ClipboardItemView: View {
 
     private func loadThumbnail() {
         guard item.category == .image, thumbnail == nil else { return }
+        if let cached = ThumbnailCache.shared.object(forKey: item.id as NSUUID) {
+            thumbnail = cached
+            return
+        }
         // storageDirectory is a nonisolated computed property — safe to read off-actor
         guard let dir = ClipboardStore.shared.storageDirectory else { return }
         let capturedItem = item
         Task.detached(priority: .userInitiated) {
-            let img = capturedItem.thumbnailImage(storageDirectory: dir)
+            guard let img = capturedItem.thumbnailImage(storageDirectory: dir) else { return }
+            ThumbnailCache.shared.setObject(img, forKey: capturedItem.id as NSUUID)
             await MainActor.run { thumbnail = img }
         }
     }
 }
 
+// MARK: - ThumbnailCache
+
+/// Rows are recreated while scrolling / reopening the panel; keep decoded thumbnails around.
+enum ThumbnailCache {
+    static let shared: NSCache<NSUUID, NSImage> = {
+        let cache = NSCache<NSUUID, NSImage>()
+        cache.countLimit = 200
+        return cache
+    }()
+}
+
 // MARK: - Date formatting
+
+private let relativeDateFormatter: RelativeDateTimeFormatter = {
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    formatter.locale = Locale(identifier: "cs_CZ")
+    return formatter
+}()
 
 extension Date {
     var relativeFormatted: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        formatter.locale = Locale(identifier: "cs_CZ")
-        return formatter.localizedString(for: self, relativeTo: Date())
+        relativeDateFormatter.localizedString(for: self, relativeTo: Date())
     }
 }

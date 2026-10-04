@@ -8,7 +8,9 @@ Jednoduchý, rychlý a nativní správce historie schránky pro macOS.
 
 ## Funkce
 
-- **Ukládá vše** — text, obrázky, RTF, HTML, soubory, barvy, a jakýkoli jiný typ dat ze schránky
+- **Ukládá vše** — text, obrázky, RTF, HTML, soubory (i více najednou), barvy, a jakýkoli jiný typ dat ze schránky
+- **Neukládá hesla** — respektuje značky správců hesel (1Password, Bitwarden aj. — `org.nspasteboard.ConcealedType`)
+- **Bez duplicit** — opakované zkopírování stejného obsahu jen posune položku nahoru
 - **Rychlý přístup** — zobrazí historii stisknutím `⇧⌘V` (nastavitelné)
 - **Pinned položky** — připni důležité položky, aby se nevymazaly
 - **Náhledy obrázků** — miniatury přímo v seznamu
@@ -26,8 +28,10 @@ Jednoduchý, rychlý a nativní správce historie schránky pro macOS.
 2. Přetáhni `ClipManager.app` do `/Applications`
 3. Spusť aplikaci
 
-> **Pozor:** Aplikace není notarizována App Store, ale je podepisována Developer ID certifikátem.  
-> Pokud macOS zablokuje spuštění: Systémová nastavení → Soukromí & Zabezpečení → Otevřít přesto
+> **Pozor:** Bez nastavených podpisových secrets (viz níže) je build podepsaný jen ad-hoc a není notarizovaný.
+> macOS pak první spuštění zablokuje: Nastavení systému → Soukromí a zabezpečení → **Přesto otevřít**
+> (nebo `xattr -dr com.apple.quarantine /Applications/ClipManager.app`).
+> Ad-hoc podpis se mění s každým buildem, proto je po aktualizaci potřeba ClipManager v Přístupnosti odebrat a přidat znovu.
 
 ### Homebrew (plánováno)
 
@@ -60,7 +64,8 @@ Sestavenou aplikaci najdeš v `build/ClipManager.app`.
 |------|---------|
 | Zobrazit historii | `⇧⌘V` |
 | Navigace v seznamu | `↑` / `↓` |
-| Vložit vybranou položku | `↵ Enter` |
+| Vložit vybranou položku | `↵ Enter` / klik |
+| Smazat vybranou položku | `⌫` |
 | Zavřít panel | `Esc` |
 | Připnout / odepnout | hover → klik na 📌 |
 | Nastavení | Pravý klik na ikonu v menu baru |
@@ -75,7 +80,7 @@ Sestavenou aplikaci najdeš v `build/ClipManager.app`.
 ```
 Sources/ClipManager/
 ├── main.swift                  # Entry point
-├── AppDelegate.swift           # App lifecycle, menu bar, panel management
+├── AppDelegate.swift           # App lifecycle, menu bar, panel, vkládání do předchozí aplikace
 ├── Core/
 │   ├── ClipboardItem.swift     # Datový model + factory (čte NSPasteboard)
 │   ├── ClipboardMonitor.swift  # Polling NSPasteboard (0.5s interval)
@@ -86,6 +91,7 @@ Sources/ClipManager/
 │   └── UpdateChecker.swift     # GitHub Releases API kontrola
 └── UI/
     ├── ClipboardPanel.swift    # NSWindow subclass (floating, glass)
+    ├── PanelState.swift        # Reset výběru/fokusu při každém otevření panelu
     ├── ClipboardPanelView.swift # Hlavní SwiftUI view
     ├── ClipboardItemView.swift # Řádek položky (text / obrázek / soubor)
     └── SettingsView.swift      # Nastavení
@@ -95,7 +101,9 @@ Sources/ClipManager/
 
 - **Apple Silicon** — GitHub Actions (`macos-15`, M-series runner) → universal binary
 - **Intel Mac** — self-hosted runner s labelom `intel-mac`
-- **Release** — tag `v*.*.*` spustí build → podpis → DMG → GitHub Release
+- **Release** — tag `v*.*.*` spustí build → podpis → DMG → (notarizace) → GitHub Release.
+  Tag s pomlčkou (`v1.2.0-beta.1`) vytvoří pre-release, který kontrola aktualizací ignoruje.
+- **Každý build** (push / PR) nahraje DMG jako artifact — ke stažení v záložce Actions
 
 ### Self-hosted Intel runner
 
@@ -119,7 +127,6 @@ Sources/ClipManager/
 
 ## Roadmap
 
-- [ ] Dvojité `⌘V` — vrátí první vložení a u kurzoru vyroluje historii s nativní animací ([specifikace](docs/double-paste.md))
 - [ ] Vyhledávání v historii
 - [ ] Blacklist aplikací (nemonitorovat hesla z 1Password apod.)
 - [ ] Sparkle auto-update (místo GitHub API)

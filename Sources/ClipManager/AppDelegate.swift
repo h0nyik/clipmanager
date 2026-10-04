@@ -11,32 +11,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     let store = ClipboardStore.shared
+    private let panelState = PanelState()
     private let monitor = ClipboardMonitor.shared
     private let hotkeyManager = HotkeyManager.shared
 
-    var previousApp: NSRunningApplication?
-    var isPasting = false
+    /// App that was frontmost when the panel opened — focus goes back there on close / paste.
+    private var previousApp: NSRunningApplication?
 
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppSettings.shared.load()
+        store.load()
         setupMenuBar()
         setupClipboardPanel()
         startMonitoring()
         registerHotkey()
-        store.load()
         UpdateChecker.checkForUpdates()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor.stop()
-        store.save()
+        store.save(wait: true)
     }
 
     func applicationWillResignActive(_ notification: Notification) {
-        guard !isPasting else { return }
-        closePanel()
+        // User switched to another app themselves — don't pull focus back
+        closePanel(restoreFocus: false)
     }
 
     // MARK: - Menu Bar
@@ -79,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupClipboardPanel() {
         let panelView = ClipboardPanelView()
             .environmentObject(store)
+            .environmentObject(panelState)
         clipboardPanel = ClipboardPanel(contentView: panelView)
     }
 
@@ -93,54 +95,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func openPanel() {
         guard let panel = clipboardPanel else { return }
-        previousApp = NSWorkspace.shared.frontmostApplication
 
-        if let screen = NSScreen.main ?? NSScreen.screens.first {
-            let frame = screen.visibleFrame
-            let w: CGFloat = 420, h: CGFloat = 560
-            let x = frame.midX - w / 2
-            let y = frame.midY - h / 2 + frame.height * 0.1
-            panel.setFrame(NSRect(x: x, y: y, width: w, height: h), display: false)
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
+
+        // Open on the screen the mouse is on
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        if let frame = screen?.visibleFrame {
+            let size = ClipboardPanel.size
+            let x = frame.midX - size.width / 2
+            let y = frame.midY - size.height / 2 + frame.height * 0.1
+            panel.setFrame(NSRect(origin: NSPoint(x: x, y: y), size: size), display: false)
         }
 
-        NSApp.activate(ignoringOtherApps: true)
+        panelState.didOpen()
+        NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
+        panel.invalidateShadow()
     }
 
-    func closePanel() {
-        clipboardPanel?.orderOut(nil)
+    /// Hides the panel. With `restoreFocus`, the app that was frontmost before gets focus back.
+    func closePanel(restoreFocus: Bool = true) {
+        guard let panel = clipboardPanel, panel.isVisible else { return }
+        panel.orderOut(nil)
+
+        let app = previousApp
         previousApp = nil
+        if restoreFocus, let app {
+            activate(app)
+        }
     }
 
     // MARK: - Paste
 
     func pasteItem(_ item: ClipboardItem) {
-        guard let panel = clipboardPanel, panel.isVisible else { return }
+        guard PasteService.writeToPasteboard(item) else { return }
+        store.moveToTop(item)
 
-        monitor.ignoringNextChange = true
-        PasteService.writeToPasteboard(item)
+        let target = previousApp
+        closePanel(restoreFocus: true)
 
-        isPasting = true
-        panel.orderOut(nil)
+        guard AppSettings.shared.pasteOnSelect, let target else { return }
+        guard PasteService.hasAccessibility else {
+            PasteService.showAccessibilityHint()
+            return
+        }
 
-        let appToActivate = previousApp
-        previousApp = nil
+        whenFrontmost(target) { isFrontmost in
+            // Never send ⌘V to some other app than the one the user came from
+            if isFrontmost { PasteService.simulateCmdV() }
+        }
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-            appToActivate?.activate(options: .activateAllWindows)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                PasteService.simulateCmdV()
-                self?.isPasting = false
+    /// Waits (up to ~0.5 s) until `app` is frontmost, then gives it a moment to make its window key.
+    private func whenFrontmost(_ app: NSRunningApplication, attemptsLeft: Int = 20, then action: @escaping (Bool) -> Void) {
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { action(true) }
+        } else if attemptsLeft == 0 {
+            action(false)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
+                self?.whenFrontmost(app, attemptsLeft: attemptsLeft - 1, then: action)
             }
         }
+    }
+
+    private func activate(_ app: NSRunningApplication) {
+        // macOS 14 cooperative activation: hand activation over explicitly, then request it
+        NSApp.yieldActivation(to: app)
+        _ = app.activate(from: NSRunningApplication.current, options: [])
     }
 
     // MARK: - Settings
 
     @objc func openSettings() {
+        closePanel(restoreFocus: false)
+
         if let existing = settingsWindow, existing.isVisible {
+            NSApp.activate()
             existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
             return
         }
 
@@ -149,12 +183,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "Nastavení ClipManager"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 460, height: 420))
+        window.setContentSize(NSSize(width: 460, height: 560))
         window.center()
         window.isReleasedWhenClosed = false
         settingsWindow = window
+        NSApp.activate()
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Private helpers
@@ -170,13 +204,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func registerHotkey() {
         let settings = AppSettings.shared
-        hotkeyManager.register(
+        let registered = hotkeyManager.register(
             keyCode: UInt32(settings.hotkeyKeyCode),
             modifiers: UInt32(settings.hotkeyModifiers)
         ) {
             DispatchQueue.main.async {
                 (NSApp.delegate as? AppDelegate)?.togglePanel()
             }
+        }
+
+        if !registered {
+            NSApp.activate()
+            let alert = NSAlert()
+            alert.messageText = "Zkratku \(settings.hotkeyDisplayString) nelze použít"
+            alert.informativeText = "Nejspíš ji už používá jiná aplikace. Historii otevřeš kliknutím na ikonu ClipManageru v menu baru."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         }
     }
 
