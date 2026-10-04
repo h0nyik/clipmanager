@@ -8,6 +8,8 @@ fáze 2 a 3 potřebují rozhodnutí (viz [Otevřené otázky](#otevřené-otázk
 
 ## Fáze 1 — aplikace (bez serveru)
 
+**Stav:** implementováno (1.1–1.6), čeká na otestování na Macu.
+
 ### 1.1 Animace otevření / zavření panelu
 Teď se panel objeví naráz. Cíl: nativní pocit (Spotlight, Raycast).
 - Otevření: pružina (`spring`, cca 0.32 s), panel se odroluje shora dolů

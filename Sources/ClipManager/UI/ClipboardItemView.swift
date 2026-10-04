@@ -7,6 +7,10 @@ struct ClipboardItemView: View {
 
     let item: ClipboardItem
     let isSelected: Bool
+    /// Key that pastes this item (nil past the 36th item)
+    var shortcut: String? = nil
+    /// Position in the multi-paste order, nil when not marked
+    var markNumber: Int? = nil
 
     @State private var isHovered   = false
     @State private var thumbnail: NSImage? = nil
@@ -15,7 +19,8 @@ struct ClipboardItemView: View {
     private var showHighlight: Bool { isSelected || isHovered }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
+            shortcutKey
             categoryBadge
             contentPreview
             Spacer(minLength: 0)
@@ -29,17 +34,51 @@ struct ClipboardItemView: View {
         .onAppear { loadThumbnail() }
     }
 
+    // MARK: - Shortcut key
+
+    private var shortcutKey: some View {
+        Text(shortcut ?? "")
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .frame(width: 20, height: 20)
+            .background {
+                if shortcut != nil {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.primary.opacity(isSelected ? 0.14 : 0.07))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                        )
+                }
+            }
+            .help(shortcut.map { "Stiskni \($0) pro vložení, ⇧\($0) pro označení" } ?? "")
+    }
+
     // MARK: - Category badge
 
     private var categoryBadge: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(item.category.color.opacity(0.15))
-                .frame(width: 36, height: 36)
-            Image(systemName: item.category.icon)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(item.category.color)
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(item.category.color.opacity(0.15))
+                    .frame(width: 36, height: 36)
+                Image(systemName: item.category.icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(item.category.color)
+            }
+
+            if let markNumber {
+                Text("\(markNumber)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 16, minHeight: 16)
+                    .padding(.horizontal, markNumber > 9 ? 2 : 0)
+                    .background(Capsule().fill(Color.accentColor))
+                    .offset(x: 5, y: -5)
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
+        .animation(.spring(duration: 0.25, bounce: 0.4), value: markNumber)
     }
 
     // MARK: - Content preview
@@ -123,7 +162,15 @@ struct ClipboardItemView: View {
 
     @ViewBuilder
     private var highlightBackground: some View {
-        if isSelected {
+        if markNumber != nil {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.accentColor.opacity(isSelected ? 0.24 : 0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+                )
+                .padding(.horizontal, 4)
+        } else if isSelected {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.accentColor.opacity(0.18))
                 .padding(.horizontal, 4)

@@ -35,6 +35,14 @@ enum PasteService {
         return true
     }
 
+    /// Puts plain text on the pasteboard (used for multi-paste of text items).
+    static func writeText(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        ClipboardMonitor.shared.syncChangeCount()
+    }
+
     // MARK: - Simulate Cmd+V
 
     /// Simulates a ⌘V keystroke. Requires Accessibility permission (check `hasAccessibility` first).

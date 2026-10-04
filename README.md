@@ -11,7 +11,9 @@ Jednoduchý, rychlý a nativní správce historie schránky pro macOS.
 - **Ukládá vše** — text, obrázky, RTF, HTML, soubory (i více najednou), barvy, a jakýkoli jiný typ dat ze schránky
 - **Neukládá hesla** — respektuje značky správců hesel (1Password, Bitwarden aj. — `org.nspasteboard.ConcealedType`)
 - **Bez duplicit** — opakované zkopírování stejného obsahu jen posune položku nahoru
-- **Rychlý přístup** — zobrazí historii stisknutím `⇧⌘V` (nastavitelné)
+- **Rychlý přístup** — zobrazí historii stisknutím `⇧⌘V`, s nativní animací
+- **Vložení jednou klávesou** — položky mají klávesy `1–0`, `Q–P`, `A–L`, `Z–M` (36 položek), funguje i na české klávesnici
+- **Hromadné vložení** — označ víc položek (`␣` / `⇧`+klávesa / `⌘`-klik) a vlož je najednou v pořadí označení
 - **Pinned položky** — připni důležité položky, aby se nevymazaly
 - **Náhledy obrázků** — miniatury přímo v seznamu
 - **Automatické vkládání** — vybráním položky se obsah okamžitě vloží (`⌘V`) do aktivní aplikace
@@ -63,8 +65,11 @@ Sestavenou aplikaci najdeš v `build/ClipManager.app`.
 | Akce | Zkratka |
 |------|---------|
 | Zobrazit historii | `⇧⌘V` |
+| Vložit položku jednou klávesou | `1`…`0`, `Q`…`P`, `A`…`L`, `Z`…`M` |
 | Navigace v seznamu | `↑` / `↓` |
 | Vložit vybranou položku | `↵ Enter` / klik |
+| Označit pro hromadné vložení | `␣` / `⇧` + klávesa položky / `⌘`-klik |
+| Vložit označené (v pořadí označení) | `↵ Enter` |
 | Smazat vybranou položku | `⌫` |
 | Zavřít panel | `Esc` |
 | Připnout / odepnout | hover → klik na 📌 |
@@ -88,10 +93,12 @@ Sources/ClipManager/
 │   ├── HotkeyManager.swift     # Carbon RegisterEventHotKey (bez Accessibility)
 │   ├── PasteService.swift      # Zápis na NSPasteboard + simulace ⌘V
 │   ├── AppSettings.swift       # UserDefaults-backed nastavení
-│   └── UpdateChecker.swift     # GitHub Releases API kontrola
+│   ├── UpdateChecker.swift     # GitHub Releases API kontrola
+│   ├── ItemShortcuts.swift     # Mapování položek na klávesy (podle keyCode)
+│   └── Log.swift               # Unified Logging + export diagnostiky
 └── UI/
     ├── ClipboardPanel.swift    # NSWindow subclass (floating, glass)
-    ├── PanelState.swift        # Reset výběru/fokusu při každém otevření panelu
+    ├── PanelModel.swift        # Stav panelu: animace, výběr, označené položky
     ├── ClipboardPanelView.swift # Hlavní SwiftUI view
     ├── ClipboardItemView.swift # Řádek položky (text / obrázek / soubor)
     └── SettingsView.swift      # Nastavení
@@ -133,6 +140,11 @@ Sources/ClipManager/
 - [ ] Homebrew Cask
 - [ ] Nastavitelná klávesová zkratka přes UI
 
+## Ikona
+
+Zdroj je `Assets/AppIcon.svg`. PNG se vyrenderuje přes `node Scripts/render-icon.mjs` (Playwright),
+`.icns` vyrobí `Scripts/build-app.sh` při sestavení.
+
 ## Licence
 
-MIT — viz [LICENSE](LICENSE)
+MIT — viz [LICENSE](LICENSE). © 2025–2026 h0nyik · [jeKral.cz](https://jekral.cz)

@@ -24,6 +24,7 @@ final class AppSettings: ObservableObject {
         case persistHistory     = "persistHistory"
         case pasteOnSelect      = "pasteOnSelect"
         case checkUpdates       = "checkUpdates"
+        case multiPasteSeparator = "multiPasteSeparator"
     }
 
     // MARK: - Properties
@@ -61,6 +62,30 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(checkUpdates, forKey: Key.checkUpdates.rawValue) }
     }
 
+    /// What goes between text items when several are pasted at once.
+    enum MultiPasteSeparator: String, CaseIterable, Identifiable {
+        case newline, space, none
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .newline: return "Nový řádek"
+            case .space:   return "Mezera"
+            case .none:    return "Nic"
+            }
+        }
+        var string: String {
+            switch self {
+            case .newline: return "\n"
+            case .space:   return " "
+            case .none:    return ""
+            }
+        }
+    }
+
+    @Published var multiPasteSeparator: MultiPasteSeparator = .newline {
+        didSet { defaults.set(multiPasteSeparator.rawValue, forKey: Key.multiPasteSeparator.rawValue) }
+    }
+
     // MARK: - Load saved values
 
     func load() {
@@ -74,6 +99,7 @@ final class AppSettings: ObservableObject {
             Key.persistHistory.rawValue:  true,
             Key.pasteOnSelect.rawValue:   true,
             Key.checkUpdates.rawValue:    true,
+            Key.multiPasteSeparator.rawValue: MultiPasteSeparator.newline.rawValue,
         ])
 
         historyLimit     = min(max(defaults.integer(forKey: Key.historyLimit.rawValue), 1), 10_000)
@@ -83,6 +109,9 @@ final class AppSettings: ObservableObject {
         pasteOnSelect    = defaults.bool(forKey: Key.pasteOnSelect.rawValue)
         launchAtLogin    = SMAppService.mainApp.status == .enabled
         checkUpdates     = defaults.bool(forKey: Key.checkUpdates.rawValue)
+        multiPasteSeparator = MultiPasteSeparator(
+            rawValue: defaults.string(forKey: Key.multiPasteSeparator.rawValue) ?? ""
+        ) ?? .newline
     }
 
     // MARK: - Launch at Login (macOS 13+)
@@ -95,7 +124,7 @@ final class AppSettings: ObservableObject {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            print("[AppSettings] Launch at login error: \(error)")
+            Log.settings.error("Launch at login failed: \(error.localizedDescription, privacy: .public)")
         }
         // Reflect what actually happened (registration can fail or need approval)
         let enabled = SMAppService.mainApp.status == .enabled

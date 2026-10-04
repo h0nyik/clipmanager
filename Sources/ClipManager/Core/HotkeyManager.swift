@@ -39,7 +39,7 @@ final class HotkeyManager {
             &hotKeyRef
         )
         if status != noErr {
-            print("[HotkeyManager] RegisterEventHotKey failed: \(status)")
+            Log.hotkey.error("RegisterEventHotKey failed: \(status)")
             hotKeyRef = nil
             return false
         }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - SettingsView
 
@@ -17,6 +18,7 @@ struct SettingsView: View {
             storageSection
             updateSection
             dangerSection
+            aboutSection
         }
         .formStyle(.grouped)
         .padding(20)
@@ -52,6 +54,12 @@ struct SettingsView: View {
                     .onDisappear(perform: applyHistoryLimit)
                 Text("položek")
                     .foregroundStyle(.secondary)
+            }
+
+            Picker("Oddělovač při hromadném vložení textu", selection: $settings.multiPasteSeparator) {
+                ForEach(AppSettings.MultiPasteSeparator.allCases) { separator in
+                    Text(separator.title).tag(separator)
+                }
             }
         }
     }
@@ -131,6 +139,42 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
+        }
+    }
+
+    private var aboutSection: some View {
+        Section("O aplikaci") {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ClipManager \(UpdateChecker.currentVersion)")
+                        .font(.headline)
+                    Text(Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String ?? "© h0nyik · jeKral.cz")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Link("jeKral.cz", destination: URL(string: "https://jekral.cz")!)
+            }
+
+            Button("Exportovat diagnostiku…", action: exportDiagnostics)
+                .help("Uloží záznamy aplikace (bez obsahu schránky) pro nahlášení chyby")
+        }
+    }
+
+    private func exportDiagnostics() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "ClipManager-diagnostika.txt"
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try Log.exportDiagnostics().write(to: url, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            Log.app.error("Diagnostics export failed: \(error.localizedDescription, privacy: .public)")
+            NSSound.beep()
         }
     }
 

@@ -45,9 +45,17 @@ if [ -n "$BUILD_NUMBER" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${APP_DIR}/Info.plist"
 fi
 
-# App icon (if built)
-if [ -f "${OUTPUT_DIR}/AppIcon.icns" ]; then
-    cp "${OUTPUT_DIR}/AppIcon.icns" "${APP_DIR}/Resources/AppIcon.icns"
+# App icon: Assets/AppIcon-1024.png → AppIcon.icns (source: Assets/AppIcon.svg, see Scripts/render-icon.mjs)
+ICON_SRC="Assets/AppIcon-1024.png"
+if [ -f "$ICON_SRC" ]; then
+    ICONSET="$(mktemp -d)/AppIcon.iconset"
+    mkdir -p "$ICONSET"
+    for size in 16 32 128 256 512; do
+        sips -z "$size" "$size" "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}.png" >/dev/null
+        sips -z $((size * 2)) $((size * 2)) "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    iconutil -c icns "$ICONSET" -o "${APP_DIR}/Resources/AppIcon.icns"
+    rm -rf "$(dirname "$ICONSET")"
 fi
 
 echo "→ .app bundle assembled at ${OUTPUT_DIR}/${PRODUCT_NAME}.app"

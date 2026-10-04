@@ -1,29 +1,54 @@
 import SwiftUI
 
+// MARK: - PanelAnimation
+
+enum PanelAnimation {
+    static let open = Animation.spring(response: 0.34, dampingFraction: 0.86)
+    static let closeDuration: TimeInterval = 0.14
+    static let close = Animation.easeIn(duration: closeDuration)
+
+    /// Rows slide in one after another; only the first ~10 are staggered.
+    static func row(index: Int) -> Animation {
+        .spring(response: 0.36, dampingFraction: 0.82).delay(Double(min(index, 10)) * 0.018)
+    }
+}
+
 // MARK: - ClipboardPanelView
+// Keyboard input is handled by AppDelegate (keyCode based, see ItemShortcuts); this view only renders
+// PanelModel and handles mouse interaction.
 
 struct ClipboardPanelView: View {
 
     @EnvironmentObject var store: ClipboardStore
-    @EnvironmentObject var panelState: PanelState
+    @EnvironmentObject var model: PanelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var selectedIndex: Int = 0
-    @FocusState private var isFocused: Bool
-
-    private var displayItems: [ClipboardItem] {
-        // Pinned items always at top, then rest sorted by timestamp desc
-        let pinned   = store.items.filter { $0.isPinned }
-        let unpinned = store.items.filter { !$0.isPinned }
-        return pinned + unpinned
-    }
+    private let size = ClipboardPanel.size
+    private let cornerRadius: CGFloat = 18
 
     private var delegate: AppDelegate? {
         NSApp.delegate as? AppDelegate
     }
 
+    private var shown: Bool { model.isPresented }
+
     var body: some View {
+        card
+            // Roll-out: the card is revealed top-down while it scales and fades in
+            .mask(alignment: .top) {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .frame(height: shown || reduceMotion ? size.height : size.height * 0.18)
+            }
+            .scaleEffect(shown || reduceMotion ? 1 : 0.97, anchor: .top)
+            .offset(y: shown || reduceMotion ? 0 : -6)
+            .opacity(shown ? 1 : 0)
+            .frame(width: ClipboardPanel.windowSize.width, height: ClipboardPanel.windowSize.height)
+    }
+
+    // MARK: - Card
+
+    private var card: some View {
         ZStack {
-            // Background: glass material
             GlassBackground()
 
             VStack(spacing: 0) {
@@ -34,10 +59,10 @@ struct ClipboardPanelView: View {
                 footer
             }
         }
-        .frame(width: ClipboardPanel.size.width, height: ClipboardPanel.size.height)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
                         colors: [.white.opacity(0.25), .white.opacity(0.05)],
@@ -47,17 +72,6 @@ struct ClipboardPanelView: View {
                     lineWidth: 0.8
                 )
         )
-        .focusable()
-        .focusEffectDisabled()
-        .focused($isFocused)
-        .onKeyPress(.escape)     { closePanel(); return .handled }
-        .onKeyPress(.upArrow)    { moveSelection(by: -1); return .handled }
-        .onKeyPress(.downArrow)  { moveSelection(by: 1); return .handled }
-        .onKeyPress(.return)     { pasteSelected(); return .handled }
-        .onKeyPress(.delete)     { deleteSelected(); return .handled }
-        .onAppear { resetForOpen() }
-        .onChange(of: panelState.openID) { _, _ in resetForOpen() }
-        .onChange(of: store.items.count) { _, _ in clampSelection() }
     }
 
     // MARK: - Header
@@ -74,10 +88,23 @@ struct ClipboardPanelView: View {
 
             Spacer()
 
-            Text("\(store.items.count)")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
+            if model.marked.isEmpty {
+                Text("\(store.items.count)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            } else {
+                Button {
+                    delegate?.pasteSelectedOrMarked()
+                } label: {
+                    Label("Vložit \(model.marked.count)", systemImage: "square.stack.3d.down.forward")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .help("Vložit označené položky v pořadí označení (↵)")
+                .transition(.scale.combined(with: .opacity))
+            }
 
             Button {
                 if ClipboardStore.confirmClearHistory() {
@@ -92,7 +119,7 @@ struct ClipboardPanelView: View {
             .help("Vymazat historii (zachovat připnuté)")
 
             Button {
-                (NSApp.delegate as? AppDelegate)?.openSettings()
+                delegate?.openSettings()
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13))
@@ -101,6 +128,7 @@ struct ClipboardPanelView: View {
             .buttonStyle(.plain)
             .help("Nastavení")
         }
+        .animation(.spring(duration: 0.25), value: model.marked.isEmpty)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
@@ -108,44 +136,50 @@ struct ClipboardPanelView: View {
     // MARK: - List
 
     private var itemList: some View {
-        Group {
-            if displayItems.isEmpty {
+        let items = store.displayItems
+
+        return Group {
+            if items.isEmpty {
                 emptyState
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(displayItems.enumerated()), id: \.element.id) { index, item in
+                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                                 ClipboardItemView(
                                     item: item,
-                                    isSelected: selectedIndex == index
+                                    isSelected: model.selectedIndex == index,
+                                    shortcut: model.shortcutLabels[safe: index],
+                                    markNumber: model.markNumber(of: item.id)
                                 )
                                 .id(item.id)
-                                .onTapGesture {
-                                    selectedIndex = index
-                                    pasteItem(item)
-                                }
-                                .contextMenu {
-                                    itemContextMenu(item: item)
-                                }
+                                .opacity(shown ? 1 : 0)
+                                .offset(y: shown || reduceMotion ? 0 : 8)
+                                .animation(
+                                    shown && !reduceMotion ? PanelAnimation.row(index: index) : PanelAnimation.close,
+                                    value: shown
+                                )
+                                .onTapGesture { handleTap(item, index: index) }
+                                .contextMenu { itemContextMenu(item: item) }
 
-                                if index < displayItems.count - 1 {
+                                if index < items.count - 1 {
                                     Divider()
                                         .padding(.horizontal, 12)
                                         .opacity(0.3)
                                 }
                             }
                         }
+                        .padding(.vertical, 4)
                     }
-                    .onChange(of: selectedIndex) { _, idx in
-                        if let item = displayItems[safe: idx] {
+                    .onChange(of: model.selectedIndex) { _, idx in
+                        if let item = store.displayItems[safe: idx] {
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 proxy.scrollTo(item.id, anchor: .center)
                             }
                         }
                     }
-                    .onChange(of: panelState.openID) { _, _ in
-                        if let first = displayItems.first {
+                    .onChange(of: model.openID) { _, _ in
+                        if let first = store.displayItems.first {
                             proxy.scrollTo(first.id, anchor: .top)
                         }
                     }
@@ -169,65 +203,60 @@ struct ClipboardPanelView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        HStack(spacing: 16) {
-            Label("Vybrat", systemImage: "return")
-            Label("Navigovat", systemImage: "arrow.up.arrow.down")
-            Label("Smazat", systemImage: "delete.left")
-            Label("Zavřít", systemImage: "escape")
+        HStack(spacing: 12) {
+            hint("1–M", "Vložit")
+            hint("␣", "Označit")
+            hint("↵", model.marked.isEmpty ? "Vložit" : "Vložit vše")
+            hint("⌫", "Smazat")
+            hint("esc", "Zavřít")
         }
         .font(.system(size: 10, weight: .medium))
-        .foregroundStyle(.quaternary)
+        .foregroundStyle(.tertiary)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
+    }
+
+    private func hint(_ key: String, _ title: String) -> some View {
+        HStack(spacing: 4) {
+            Text(key)
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
+            Text(title)
+        }
     }
 
     // MARK: - Context menu
 
     @ViewBuilder
     private func itemContextMenu(item: ClipboardItem) -> some View {
+        Button("Vložit") {
+            delegate?.pasteItem(item)
+        }
+        Button(model.markNumber(of: item.id) == nil ? "Označit pro hromadné vložení" : "Zrušit označení") {
+            model.toggleMark(item.id)
+        }
         Button(item.isPinned ? "Odepnout" : "Připnout") {
             store.togglePin(item)
         }
         Divider()
         Button("Smazat", role: .destructive) {
+            model.marked.removeAll { $0 == item.id }
             store.removeItem(item)
         }
     }
 
     // MARK: - Actions
 
-    private func pasteItem(_ item: ClipboardItem) {
-        // AppDelegate handles both modes (auto-paste on / copy only)
-        delegate?.pasteItem(item)
-    }
-
-    private func pasteSelected() {
-        guard let item = displayItems[safe: selectedIndex] else { return }
-        pasteItem(item)
-    }
-
-    private func closePanel() {
-        delegate?.closePanel()
-    }
-
-    private func deleteSelected() {
-        guard let item = displayItems[safe: selectedIndex] else { return }
-        store.removeItem(item)
-    }
-
-    private func resetForOpen() {
-        selectedIndex = 0
-        // Focus after the window became key, otherwise arrow keys may not reach the view
-        DispatchQueue.main.async { isFocused = true }
-    }
-
-    private func clampSelection() {
-        selectedIndex = min(selectedIndex, max(0, displayItems.count - 1))
-    }
-
-    private func moveSelection(by delta: Int) {
-        guard !displayItems.isEmpty else { return }
-        selectedIndex = min(max(selectedIndex + delta, 0), displayItems.count - 1)
+    private func handleTap(_ item: ClipboardItem, index: Int) {
+        model.selectedIndex = index
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) || flags.contains(.shift) {
+            model.toggleMark(item.id)
+        } else {
+            delegate?.pasteItem(item)
+        }
     }
 }
 

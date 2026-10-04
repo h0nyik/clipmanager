@@ -27,6 +27,11 @@ final class ClipboardStore: ObservableObject {
 
     private init() {}
 
+    /// Order shown in the panel: pinned items first, then the rest newest first.
+    var displayItems: [ClipboardItem] {
+        items.filter(\.isPinned) + items.filter { !$0.isPinned }
+    }
+
     // MARK: - Mutations
 
     func addItem(_ item: ClipboardItem) {
@@ -131,7 +136,7 @@ final class ClipboardStore: ObservableObject {
                 let data = try JSONEncoder().encode(snapshot)
                 try data.write(to: metaURL, options: .atomic)
             } catch {
-                print("[ClipboardStore] Save error: \(error)")
+                Log.store.error("Save failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         if wait { saveQueue.sync {} }
@@ -153,7 +158,7 @@ final class ClipboardStore: ObservableObject {
             // One undecodable entry shouldn't wipe the whole history
             items = try JSONDecoder().decode([LossyItem].self, from: data).compactMap(\.value)
         } catch {
-            print("[ClipboardStore] Load error: \(error)")
+            Log.store.error("Load failed, history moved to history.corrupt.json: \(error.localizedDescription, privacy: .public)")
             // Keep the unreadable file for inspection instead of overwriting it on the next save
             let backup = metaURL.deletingPathExtension().appendingPathExtension("corrupt.json")
             try? FileManager.default.removeItem(at: backup)

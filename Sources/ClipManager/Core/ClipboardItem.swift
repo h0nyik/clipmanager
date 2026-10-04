@@ -146,6 +146,16 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         lhs.id == rhs.id && lhs.isPinned == rhs.isPinned && lhs.timestamp == rhs.timestamp
     }
 
+    /// Plain-text representation (first payload), used when several text items are pasted at once.
+    func plainText(storageDirectory: URL) -> String? {
+        guard let payload = payloads.first else { return nil }
+        let textType = NSPasteboard.PasteboardType.string.rawValue
+        if let data = data(forType: textType, in: payload, storageDirectory: storageDirectory) {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
+
     /// Raw data of one representation, from inline storage or from the item's data directory.
     func data(forType type: String, in payload: Payload, storageDirectory: URL) -> Data? {
         if let b64 = payload.inlineData[type] {
@@ -192,7 +202,10 @@ enum ClipboardItemFactory {
         }
 
         let allTypes = Set(pasteboardItems.flatMap { $0.types.map(\.rawValue) })
-        guard allTypes.isDisjoint(with: ignoredMarkerTypes) else { return nil }
+        guard allTypes.isDisjoint(with: ignoredMarkerTypes) else {
+            Log.clipboard.info("Skipped pasteboard marked as concealed/transient")
+            return nil
+        }
 
         let itemID = UUID()
         let itemDir = storageDirectory.appendingPathComponent(itemID.uuidString, isDirectory: true)
@@ -217,7 +230,7 @@ enum ClipboardItemFactory {
                         try FileManager.default.createDirectory(at: itemDir, withIntermediateDirectories: true)
                         try data.write(to: itemDir.appendingPathComponent(filename))
                     } catch {
-                        print("[ClipboardItemFactory] Failed to store \(typeString): \(error)")
+                        Log.clipboard.error("Failed to store \(typeString, privacy: .public): \(error.localizedDescription, privacy: .public)")
                         continue
                     }
                     payload.fileData[typeString] = filename
