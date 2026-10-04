@@ -18,7 +18,9 @@ final class HotkeyManager {
 
     // MARK: - Registration
 
-    func register(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {
+    /// Returns false if the shortcut couldn't be registered (e.g. another app already owns it).
+    @discardableResult
+    func register(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) -> Bool {
         unregister()
         self.handler = handler
 
@@ -28,7 +30,7 @@ final class HotkeyManager {
 
         // Carbon modifier bit translation:
         // AppSettings stores modifiers as Carbon bits already
-        RegisterEventHotKey(
+        let status = RegisterEventHotKey(
             keyCode,
             modifiers,
             hotKeyID,
@@ -36,6 +38,12 @@ final class HotkeyManager {
             0,
             &hotKeyRef
         )
+        if status != noErr {
+            Log.hotkey.error("RegisterEventHotKey failed: \(status)")
+            hotKeyRef = nil
+            return false
+        }
+        return true
     }
 
     func unregister() {

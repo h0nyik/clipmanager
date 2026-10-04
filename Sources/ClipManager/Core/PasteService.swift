@@ -7,73 +7,90 @@ enum PasteService {
 
     // MARK: - Write to pasteboard
 
-    /// Writes all stored data from a ClipboardItem back onto NSPasteboard.general.
-    static func writeToPasteboard(_ item: ClipboardItem) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
+    /// Writes all stored representations of a ClipboardItem back onto NSPasteboard.general.
+    /// Returns false (and leaves the pasteboard untouched) if nothing could be restored.
+    @discardableResult
+    static func writeToPasteboard(_ item: ClipboardItem) -> Bool {
+        guard let storageDir = ClipboardStore.shared.storageDirectory else { return false }
 
-        guard let storageDir = ClipboardStore.shared.storageDirectory else { return }
-
-        let pbItem = NSPasteboardItem()
-
-        for typeString in item.pasteboardTypes {
-            let pbType = NSPasteboard.PasteboardType(rawValue: typeString)
-
-            var data: Data?
-
-            if let b64 = item.inlineData[typeString] {
-                data = Data(base64Encoded: b64)
-            } else if let filename = item.fileData[typeString] {
-                let fileURL = storageDir
-                    .appendingPathComponent(item.id.uuidString)
-                    .appendingPathComponent(filename)
-                data = try? Data(contentsOf: fileURL)
+        let pbItems: [NSPasteboardItem] = item.payloads.compactMap { payload in
+            let pbItem = NSPasteboardItem()
+            for type in payload.types {
+                if let data = item.data(forType: type, in: payload, storageDirectory: storageDir) {
+                    pbItem.setData(data, forType: NSPasteboard.PasteboardType(rawValue: type))
+                }
             }
-
-            if let data {
-                pbItem.setData(data, forType: pbType)
-            }
+            return pbItem.types.isEmpty ? nil : pbItem
         }
 
-        pasteboard.writeObjects([pbItem])
+        guard !pbItems.isEmpty else {
+            NSSound.beep()
+            return false
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(pbItems)
+        ClipboardMonitor.shared.syncChangeCount()
+        return true
+    }
+
+    /// Puts plain text on the pasteboard (used for multi-paste of text items).
+    static func writeText(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        ClipboardMonitor.shared.syncChangeCount()
     }
 
     // MARK: - Simulate Cmd+V
 
-    /// Simulates ⌘V keystroke using CGEventPost.
-    /// Requires Accessibility permission; if not granted, does nothing (user can press Cmd+V manually).
+    /// Simulates a ⌘V keystroke. Requires Accessibility permission (check `hasAccessibility` first).
     static func simulateCmdV() {
-        guard AXIsProcessTrusted() else {
-            // Show a subtle toast or notification to inform the user
-            showAccessibilityHint()
-            return
-        }
-
-        let src = CGEventSource(stateID: .hidSystemState)
-        let keyDown = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)   // V
-        let keyUp   = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
+        let src = CGEventSource(stateID: .combinedSessionState)
+        let vKey: CGKeyCode = 0x09
+        let keyDown = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: true)
+        let keyUp   = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: false)
         keyDown?.flags = .maskCommand
         keyUp?.flags   = .maskCommand
-        keyDown?.post(tap: .cgAnnotatedSessionEventTap)
-        keyUp?.post(tap: .cgAnnotatedSessionEventTap)
+        keyDown?.post(tap: .cgSessionEventTap)
+        keyUp?.post(tap: .cgSessionEventTap)
     }
 
-    // MARK: - Accessibility check
+    // MARK: - Accessibility
 
-    static func requestAccessibilityIfNeeded() {
-        guard !AXIsProcessTrusted() else { return }
+    static var hasAccessibility: Bool { AXIsProcessTrusted() }
+
+    /// Shows the system prompt and opens the Accessibility pane in System Settings.
+    static func requestAccessibility() {
         let options: [String: Bool] = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        AXIsProcessTrustedWithOptions(options as CFDictionary)
+        guard !AXIsProcessTrustedWithOptions(options as CFDictionary) else { return }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
-    private static func showAccessibilityHint() {
+    static func showAccessibilityHint() {
+        NSApp.activate()
         let alert = NSAlert()
         alert.messageText = "ClipManager — chybí oprávnění"
-        alert.informativeText = "Přidej ClipManager do Accessibility v Nastavení systému → Soukromí & Zabezpečení → Přístupnost, aby fungovalo automatické vkládání."
+        alert.informativeText = """
+            Obsah je zkopírovaný ve schránce — vlož ho ručně pomocí ⌘V.
+
+            Pro automatické vkládání přidej ClipManager v Nastavení systému → Soukromí a zabezpečení → Přístupnost. \
+            Po aktualizaci aplikace může být potřeba ClipManager ze seznamu odebrat a přidat znovu.
+            """
         alert.addButton(withTitle: "Otevřít nastavení")
+        alert.addButton(withTitle: "Nevkládat automaticky")
         alert.addButton(withTitle: "Zrušit")
-        if alert.runModal() == .alertFirstButtonReturn {
-            requestAccessibilityIfNeeded()
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            requestAccessibility()
+        case .alertSecondButtonReturn:
+            AppSettings.shared.pasteOnSelect = false
+        default:
+            break
         }
     }
 }

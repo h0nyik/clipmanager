@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - SettingsView
 
@@ -7,8 +8,8 @@ struct SettingsView: View {
     @EnvironmentObject var store: ClipboardStore
     @ObservedObject private var settings = AppSettings.shared
 
-    @State private var isRecordingHotkey = false
     @State private var historyLimitStr: String = ""
+    @State private var hasAccessibility = PasteService.hasAccessibility
 
     var body: some View {
         Form {
@@ -17,12 +18,21 @@ struct SettingsView: View {
             storageSection
             updateSection
             dangerSection
+            aboutSection
         }
         .formStyle(.grouped)
         .padding(20)
         .frame(width: 460)
         .onAppear {
             historyLimitStr = "\(settings.historyLimit)"
+            hasAccessibility = PasteService.hasAccessibility
+        }
+        // Permission is granted in System Settings — refresh when the user comes back
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            hasAccessibility = PasteService.hasAccessibility
+        }
+        .onChange(of: settings.persistHistory) { _, _ in
+            store.save()
         }
     }
 
@@ -40,15 +50,16 @@ struct SettingsView: View {
                 TextField("100", text: $historyLimitStr)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 60)
-                    .onSubmit {
-                        if let val = Int(historyLimitStr), val > 0, val <= 10_000 {
-                            settings.historyLimit = val
-                        } else {
-                            historyLimitStr = "\(settings.historyLimit)"
-                        }
-                    }
+                    .onSubmit(applyHistoryLimit)
+                    .onDisappear(perform: applyHistoryLimit)
                 Text("položek")
                     .foregroundStyle(.secondary)
+            }
+
+            Picker("Oddělovač při hromadném vložení textu", selection: $settings.multiPasteSeparator) {
+                ForEach(AppSettings.MultiPasteSeparator.allCases) { separator in
+                    Text(separator.title).tag(separator)
+                }
             }
         }
     }
@@ -83,7 +94,9 @@ struct SettingsView: View {
             }
 
             Button("Vymazat historii (zachovat připnuté)") {
-                store.clearAll(keepPinned: true)
+                if ClipboardStore.confirmClearHistory() {
+                    store.clearAll(keepPinned: true)
+                }
             }
             .foregroundStyle(.red)
         }
@@ -93,8 +106,13 @@ struct SettingsView: View {
         Section("Aktualizace") {
             Toggle("Kontrolovat aktualizace automaticky", isOn: $settings.checkUpdates)
 
-            Button("Zkontrolovat nyní") {
-                UpdateChecker.checkForUpdates(force: true)
+            HStack {
+                Text("Verze \(UpdateChecker.currentVersion) (\(UpdateChecker.currentBuild))")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Zkontrolovat nyní") {
+                    UpdateChecker.checkForUpdates(force: true)
+                }
             }
         }
     }
@@ -103,19 +121,69 @@ struct SettingsView: View {
         Section("Přístupnost") {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Automatické vkládání")
-                        .font(.body)
-                    Text("Vyžaduje povolení v Nastavení systému → Soukromí → Přístupnost")
+                    Label(
+                        hasAccessibility ? "Automatické vkládání povoleno" : "Automatické vkládání nemá oprávnění",
+                        systemImage: hasAccessibility ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(hasAccessibility ? Color.green : Color.orange)
+                    Text("Nastavení systému → Soukromí a zabezpečení → Přístupnost")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Otevřít nastavení") {
-                    PasteService.requestAccessibilityIfNeeded()
+                if !hasAccessibility {
+                    Button("Povolit…") {
+                        PasteService.requestAccessibility()
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
             }
+        }
+    }
+
+    private var aboutSection: some View {
+        Section("O aplikaci") {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ClipManager \(UpdateChecker.currentVersion)")
+                        .font(.headline)
+                    Text(Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String ?? "© h0nyik · jeKral.cz")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Link("jeKral.cz", destination: URL(string: "https://jekral.cz")!)
+            }
+
+            Button("Exportovat diagnostiku…", action: exportDiagnostics)
+                .help("Uloží záznamy aplikace (bez obsahu schránky) pro nahlášení chyby")
+        }
+    }
+
+    private func exportDiagnostics() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "ClipManager-diagnostika.txt"
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try Log.exportDiagnostics().write(to: url, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            Log.app.error("Diagnostics export failed: \(error.localizedDescription, privacy: .public)")
+            NSSound.beep()
+        }
+    }
+
+    private func applyHistoryLimit() {
+        if let val = Int(historyLimitStr), val > 0, val <= 10_000 {
+            settings.historyLimit = val
+            store.trimToLimit()
+        } else {
+            historyLimitStr = "\(settings.historyLimit)"
         }
     }
 

@@ -10,6 +10,9 @@ final class AppSettings: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
+    /// Suppresses side effects of didSet while values are read from disk.
+    private var isLoading = false
+
     private init() {}
 
     // MARK: - Keys
@@ -20,8 +23,8 @@ final class AppSettings: ObservableObject {
         case hotkeyModifiers    = "hotkeyModifiers"
         case persistHistory     = "persistHistory"
         case pasteOnSelect      = "pasteOnSelect"
-        case launchAtLogin      = "launchAtLogin"
         case checkUpdates       = "checkUpdates"
+        case multiPasteSeparator = "multiPasteSeparator"
     }
 
     // MARK: - Properties
@@ -47,9 +50,10 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(pasteOnSelect, forKey: Key.pasteOnSelect.rawValue) }
     }
 
+    /// Mirrors SMAppService (the system is the source of truth, the user can change it in System Settings).
     @Published var launchAtLogin: Bool = false {
         didSet {
-            defaults.set(launchAtLogin, forKey: Key.launchAtLogin.rawValue)
+            guard !isLoading, launchAtLogin != oldValue else { return }
             applyLaunchAtLogin()
         }
     }
@@ -58,26 +62,56 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(checkUpdates, forKey: Key.checkUpdates.rawValue) }
     }
 
+    /// What goes between text items when several are pasted at once.
+    enum MultiPasteSeparator: String, CaseIterable, Identifiable {
+        case newline, space, none
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .newline: return "Nový řádek"
+            case .space:   return "Mezera"
+            case .none:    return "Nic"
+            }
+        }
+        var string: String {
+            switch self {
+            case .newline: return "\n"
+            case .space:   return " "
+            case .none:    return ""
+            }
+        }
+    }
+
+    @Published var multiPasteSeparator: MultiPasteSeparator = .newline {
+        didSet { defaults.set(multiPasteSeparator.rawValue, forKey: Key.multiPasteSeparator.rawValue) }
+    }
+
     // MARK: - Load saved values
 
     func load() {
+        isLoading = true
+        defer { isLoading = false }
+
         defaults.register(defaults: [
             Key.historyLimit.rawValue:    100,
             Key.hotkeyKeyCode.rawValue:   0x09,
             Key.hotkeyModifiers.rawValue: 768,
             Key.persistHistory.rawValue:  true,
             Key.pasteOnSelect.rawValue:   true,
-            Key.launchAtLogin.rawValue:   false,
             Key.checkUpdates.rawValue:    true,
+            Key.multiPasteSeparator.rawValue: MultiPasteSeparator.newline.rawValue,
         ])
 
-        historyLimit     = defaults.integer(forKey: Key.historyLimit.rawValue)
+        historyLimit     = min(max(defaults.integer(forKey: Key.historyLimit.rawValue), 1), 10_000)
         hotkeyKeyCode    = defaults.integer(forKey: Key.hotkeyKeyCode.rawValue)
         hotkeyModifiers  = defaults.integer(forKey: Key.hotkeyModifiers.rawValue)
         persistHistory   = defaults.bool(forKey: Key.persistHistory.rawValue)
         pasteOnSelect    = defaults.bool(forKey: Key.pasteOnSelect.rawValue)
-        launchAtLogin    = defaults.bool(forKey: Key.launchAtLogin.rawValue)
+        launchAtLogin    = SMAppService.mainApp.status == .enabled
         checkUpdates     = defaults.bool(forKey: Key.checkUpdates.rawValue)
+        multiPasteSeparator = MultiPasteSeparator(
+            rawValue: defaults.string(forKey: Key.multiPasteSeparator.rawValue) ?? ""
+        ) ?? .newline
     }
 
     // MARK: - Launch at Login (macOS 13+)
@@ -90,7 +124,17 @@ final class AppSettings: ObservableObject {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            print("[AppSettings] Launch at login error: \(error)")
+            Log.settings.error("Launch at login failed: \(error.localizedDescription, privacy: .public)")
+        }
+        // Reflect what actually happened (registration can fail or need approval)
+        let enabled = SMAppService.mainApp.status == .enabled
+        if enabled != launchAtLogin {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isLoading = true
+                self.launchAtLogin = enabled
+                self.isLoading = false
+            }
         }
     }
 

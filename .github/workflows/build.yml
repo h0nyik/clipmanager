@@ -28,11 +28,17 @@ jobs:
       - name: Assemble .app bundle
         run: bash Scripts/build-app.sh release universal
 
-      - name: Upload .app artifact
+      - name: Create DMG
+        run: bash Scripts/create-dmg.sh
+        env:
+          CLIPMANAGER_VERSION: dev-${{ github.run_number }}
+
+      # Upload the DMG, not the bare .app: artifact zips drop the executable bit
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: ClipManager-universal-${{ github.sha }}
-          path: build/ClipManager.app
+          path: build/ClipManager-dev-${{ github.run_number }}.dmg
           retention-days: 14
 
   build-intel:

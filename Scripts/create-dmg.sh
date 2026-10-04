@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Creates a distributable DMG from ClipManager.app.
-# Requires: create-dmg (brew install create-dmg)
+# Creates a distributable DMG (app + Applications shortcut) from build/ClipManager.app.
+# Uses only hdiutil, so it works on a clean CI runner without extra tools.
 
 set -euo pipefail
 
@@ -11,27 +11,35 @@ APP="${OUTPUT_DIR}/${PRODUCT_NAME}.app"
 DMG_NAME="${PRODUCT_NAME}-${VERSION}.dmg"
 DMG_OUT="${OUTPUT_DIR}/${DMG_NAME}"
 
-if ! command -v create-dmg &>/dev/null; then
-    echo "Error: create-dmg not found. Run: brew install create-dmg"
-    exit 1
-fi
-
 [ -d "$APP" ] || { echo "Error: ${APP} not found. Run build-app.sh first."; exit 1; }
 
 echo "→ Creating DMG: ${DMG_NAME}"
 
-create-dmg \
-    --volname "${PRODUCT_NAME} ${VERSION}" \
-    --volicon "${OUTPUT_DIR}/AppIcon.icns" \
-    --window-pos 200 120 \
-    --window-size 600 400 \
-    --icon-size 128 \
-    --icon "${PRODUCT_NAME}.app" 150 190 \
-    --hide-extension "${PRODUCT_NAME}.app" \
-    --app-drop-link 450 190 \
-    --no-internet-enable \
-    "${DMG_OUT}" \
-    "$APP" \
-    2>/dev/null || true  # create-dmg exits non-zero on some warnings
+STAGING="$(mktemp -d)"
+trap 'rm -rf "$STAGING"' EXIT
+
+ditto "$APP" "${STAGING}/${PRODUCT_NAME}.app"
+ln -s /Applications "${STAGING}/Applications"
+rm -f "$DMG_OUT"
+
+# hdiutil occasionally fails with "Resource busy" on CI runners — retry a few times
+for attempt in 1 2 3; do
+    if hdiutil create \
+        -volname "${PRODUCT_NAME} ${VERSION}" \
+        -srcfolder "$STAGING" \
+        -fs HFS+ \
+        -format UDZO \
+        -ov \
+        "$DMG_OUT"; then
+        break
+    fi
+    [ "$attempt" -eq 3 ] && { echo "Error: hdiutil failed"; exit 1; }
+    echo "hdiutil failed (attempt ${attempt}), retrying…"
+    sleep 5
+done
+
+if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    codesign --force --sign "$CODESIGN_IDENTITY" --timestamp "$DMG_OUT"
+fi
 
 echo "✓ DMG: ${DMG_OUT}"

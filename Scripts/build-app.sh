@@ -17,15 +17,15 @@ echo "→ Building ${PRODUCT_NAME} (config=${CONFIG}, arch=${ARCH})"
 
 # ---- Build binary ----
 if [ "$ARCH" = "universal" ]; then
-    swift build -c "$CONFIG" --arch arm64 --arch x86_64
-    BINARY=".build/apple/Products/${CONFIG^}/${PRODUCT_NAME}"
-elif [ "$ARCH" = "arm64" ]; then
-    swift build -c "$CONFIG" --arch arm64
-    BINARY=".build/arm64-apple-macosx/${CONFIG}/${PRODUCT_NAME}"
+    ARCH_FLAGS=(--arch arm64 --arch x86_64)
 else
-    swift build -c "$CONFIG" --arch x86_64
-    BINARY=".build/x86_64-apple-macosx/${CONFIG}/${PRODUCT_NAME}"
+    ARCH_FLAGS=(--arch "$ARCH")
 fi
+
+swift build -c "$CONFIG" "${ARCH_FLAGS[@]}"
+# Ask SwiftPM for the output dir instead of hardcoding it (macOS ships bash 3.2,
+# so no ${VAR^} to capitalize "release" → "Release").
+BINARY="$(swift build -c "$CONFIG" "${ARCH_FLAGS[@]}" --show-bin-path)/${PRODUCT_NAME}"
 
 # ---- Assemble .app bundle ----
 rm -rf "${OUTPUT_DIR}/${PRODUCT_NAME}.app"
@@ -35,12 +35,27 @@ mkdir -p "${APP_DIR}/Resources"
 # Binary
 cp "$BINARY" "${APP_DIR}/MacOS/${PRODUCT_NAME}"
 
-# Info.plist
+# Info.plist (version from the release tag / CI run, if provided)
 cp "$PLIST_SRC" "${APP_DIR}/Info.plist"
+if [ -n "${CLIPMANAGER_VERSION:-}" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${CLIPMANAGER_VERSION}" "${APP_DIR}/Info.plist"
+fi
+BUILD_NUMBER="${CLIPMANAGER_BUILD:-${GITHUB_RUN_NUMBER:-}}"
+if [ -n "$BUILD_NUMBER" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${APP_DIR}/Info.plist"
+fi
 
-# App icon (if built)
-if [ -f "${OUTPUT_DIR}/AppIcon.icns" ]; then
-    cp "${OUTPUT_DIR}/AppIcon.icns" "${APP_DIR}/Resources/AppIcon.icns"
+# App icon: Assets/AppIcon-1024.png → AppIcon.icns (source: Assets/AppIcon.svg, see Scripts/render-icon.mjs)
+ICON_SRC="Assets/AppIcon-1024.png"
+if [ -f "$ICON_SRC" ]; then
+    ICONSET="$(mktemp -d)/AppIcon.iconset"
+    mkdir -p "$ICONSET"
+    for size in 16 32 128 256 512; do
+        sips -z "$size" "$size" "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}.png" >/dev/null
+        sips -z $((size * 2)) $((size * 2)) "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    iconutil -c icns "$ICONSET" -o "${APP_DIR}/Resources/AppIcon.icns"
+    rm -rf "$(dirname "$ICONSET")"
 fi
 
 echo "→ .app bundle assembled at ${OUTPUT_DIR}/${PRODUCT_NAME}.app"
